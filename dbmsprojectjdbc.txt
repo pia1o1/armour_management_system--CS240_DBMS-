@@ -1,0 +1,1292 @@
+import java.sql.*;
+import java.util.*;
+import java.util.Date;
+
+public class WeaponArmoryJDBC {
+    private static final String URL = "jdbc:mysql://localhost:3306/WeaponArmory";
+    private static final String USER = "root";
+    private static final String PASSWORD = "r1sh4v@jha";
+
+    public static void main(String[] args) {
+        try (Connection conn = DriverManager.getConnection(URL, USER, PASSWORD);
+             Scanner scanner = new Scanner(System.in)) {
+
+            while (true) {
+                System.out.println("\nMain Menu:");
+                System.out.println("1. Display tables");
+                System.out.println("2. Add a new weapon");
+                System.out.println("3. Add a new attachment");
+                System.out.println("4. Place order");
+                System.out.println("5. Add a customer or employee");
+                System.out.println("7. View customer purchase history");
+                System.out.println("8. Generate inventory report");
+                System.out.println("9. Find compatible attachments");
+                System.out.println("10. Generate sales report");
+                System.out.println("11. Check license expiry");
+                System.out.println("12. View top selling items");
+                System.out.println("13. Employee performance report");
+                System.out.println("14. Search database");
+                System.out.println("6. Exit");
+                System.out.println("enter your choice:");
+
+                int mainChoice = scanner.nextInt();
+                scanner.nextLine();
+
+                switch (mainChoice) {
+                    case 1:
+                        System.out.print("Enter table name to display: ");
+                        String tableName = scanner.nextLine();
+                        displayTable(conn, tableName);
+                        break;
+                    case 2:
+                        addWeapon(conn, scanner);
+                        break;
+                    case 3:
+                        addAttachment(conn, scanner);
+                        break;
+                    case 4:
+                        placeOrder(conn, scanner);
+                        break;
+                    case 5:
+                        addPersonnel(conn, scanner);
+                        break;
+                    case 6:
+                        System.out.println("Exiting program.");
+                        return;
+                    case 7:
+                        viewCustomerPurchaseHistory(conn, scanner);
+                        break;
+                    case 8:
+                        generateInventoryReport(conn);
+                        break;
+                    case 9:
+                        findCompatibleAttachments(conn, scanner);
+                        break;
+                    case 10:
+                        generateSalesReport(conn, scanner);
+                        break;
+                    case 11:
+                        checkLicenseExpiry(conn, scanner);
+                        break;
+                    case 12:
+                        generateTopSellingReport(conn, scanner);
+                        break;
+                    case 13:
+                        generateEmployeePerformanceReport(conn, scanner);
+                        break;
+                    case 14:
+                        searchDatabase(conn, scanner);
+                        break;
+                    default:
+                        System.out.println("Invalid choice. Try again.");
+                }
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+    }
+    // 1. Customer Purchase History Query
+    private static void viewCustomerPurchaseHistory(Connection conn, Scanner scanner) throws SQLException {
+        System.out.print("Enter customer ID: ");
+        int customerId = scanner.nextInt();
+        scanner.nextLine();
+
+        String query = """
+        SELECT t.trans_id, t.total_amount, t.payment_method,
+               GROUP_CONCAT(DISTINCT CONCAT(w.name, ' (', o.quantity, ')') SEPARATOR ', ') AS weapons,
+               GROUP_CONCAT(DISTINCT a.name SEPARATOR ', ') AS attachments
+        FROM Transaction t
+        LEFT JOIN Orders o ON t.trans_id = o.trans_id
+        LEFT JOIN Orders_Weapons ow ON o.order_id = ow.order_id
+        LEFT JOIN Weapons w ON ow.weap_id = w.weap_id
+        LEFT JOIN Orders_Attachments oa ON o.order_id = oa.order_id
+        LEFT JOIN Attachments a ON oa.attachment_id = a.attachment_id
+        WHERE t.cust_id = ?
+        GROUP BY t.trans_id
+        ORDER BY t.trans_id DESC
+    """;
+
+        try (PreparedStatement stmt = conn.prepareStatement(query)) {
+            stmt.setInt(1, customerId);
+            ResultSet rs = stmt.executeQuery();
+
+            System.out.println("\nPurchase History for Customer ID: " + customerId);
+            System.out.println("------------------------------------------------------");
+
+            boolean hasRecords = false;
+            while (rs.next()) {
+                hasRecords = true;
+                System.out.println("Transaction ID: " + rs.getInt("trans_id"));
+                System.out.println("Amount: $" + rs.getDouble("total_amount"));
+                System.out.println("Payment Method: " + rs.getString("payment_method"));
+
+                String weapons = rs.getString("weapons");
+                System.out.println("Weapons: " + (weapons != null ? weapons : "None"));
+
+                String attachments = rs.getString("attachments");
+                System.out.println("Attachments: " + (attachments != null ? attachments : "None"));
+
+                System.out.println("------------------------------------------------------");
+            }
+
+            if (!hasRecords) {
+                System.out.println("No purchase history found for this customer.");
+            }
+        }
+    }
+
+    // 2. Inventory Status Report Query
+    private static void generateInventoryReport(Connection conn) throws SQLException {
+        String weaponsQuery = """
+        SELECT name, caliber, price, stock, manufacture, 
+               CASE 
+                   WHEN stock <= 5 THEN 'Low' 
+                   WHEN stock <= 20 THEN 'Medium' 
+                   ELSE 'High' 
+               END AS stock_level
+        FROM Weapons
+        ORDER BY stock ASC
+    """;
+
+        String attachmentsQuery = """
+        SELECT name, price, stock, manufacture,
+               CASE 
+                   WHEN stock <= 5 THEN 'Low' 
+                   WHEN stock <= 20 THEN 'Medium' 
+                   ELSE 'High' 
+               END AS stock_level
+        FROM Attachments
+        ORDER BY stock ASC
+    """;
+
+        System.out.println("\n===== INVENTORY REPORT =====");
+
+        System.out.println("\nWEAPONS:");
+        System.out.println("--------------------------------------------------------------------------");
+        try (Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery(weaponsQuery)) {
+
+            System.out.printf("%-30s %-10s %-10s %-10s %-20s %-10s\n",
+                    "Name", "Caliber", "Price ($)", "Stock", "Manufacturer", "Status");
+            System.out.println("--------------------------------------------------------------------------");
+
+            while (rs.next()) {
+                System.out.printf("%-30s %-10s %-10.2f %-10d %-20s %-10s\n",
+                        rs.getString("name"),
+                        rs.getString("caliber"),
+                        rs.getDouble("price"),
+                        rs.getInt("stock"),
+                        rs.getString("manufacture"),
+                        rs.getString("stock_level"));
+            }
+        }
+
+        System.out.println("\nATTACHMENTS:");
+        System.out.println("--------------------------------------------------------------");
+        try (Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery(attachmentsQuery)) {
+
+            System.out.printf("%-30s %-10s %-10s %-20s %-10s\n",
+                    "Name", "Price ($)", "Stock", "Manufacturer", "Status");
+            System.out.println("--------------------------------------------------------------");
+
+            while (rs.next()) {
+                System.out.printf("%-30s %-10.2f %-10d %-20s %-10s\n",
+                        rs.getString("name"),
+                        rs.getDouble("price"),
+                        rs.getInt("stock"),
+                        rs.getString("manufacture"),
+                        rs.getString("stock_level"));
+            }
+        }
+    }
+
+    // 3. Compatible Attachments for a Weapon Query
+    private static void findCompatibleAttachments(Connection conn, Scanner scanner) throws SQLException {
+        System.out.println("\nFind Compatible Attachments:");
+
+        // Show available weapons
+        System.out.println("Available Weapons:");
+        String weaponsQuery = "SELECT weap_id, name FROM Weapons ORDER BY name";
+        try (Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery(weaponsQuery)) {
+
+            while (rs.next()) {
+                System.out.println(rs.getInt("weap_id") + ": " + rs.getString("name"));
+            }
+        }
+
+        System.out.print("\nEnter weapon ID: ");
+        int weaponId = scanner.nextInt();
+        scanner.nextLine();
+
+        String query = """
+        SELECT a.attachment_id, a.name, a.price, a.stock, a.manufacture
+        FROM Attachments a
+        JOIN Weapon_Fits_Attachment wfa ON a.attachment_id = wfa.attachment_id
+        WHERE wfa.weap_id = ?
+        ORDER BY a.name
+    """;
+
+        try (PreparedStatement stmt = conn.prepareStatement(query)) {
+            stmt.setInt(1, weaponId);
+            ResultSet rs = stmt.executeQuery();
+
+            System.out.println("\nCompatible Attachments:");
+            System.out.println("--------------------------------------------------");
+            System.out.printf("%-5s %-30s %-10s %-10s %-20s\n",
+                    "ID", "Name", "Price ($)", "Stock", "Manufacturer");
+            System.out.println("--------------------------------------------------");
+
+            boolean hasCompatibleAttachments = false;
+            while (rs.next()) {
+                hasCompatibleAttachments = true;
+                System.out.printf("%-5d %-30s %-10.2f %-10d %-20s\n",
+                        rs.getInt("attachment_id"),
+                        rs.getString("name"),
+                        rs.getDouble("price"),
+                        rs.getInt("stock"),
+                        rs.getString("manufacture"));
+            }
+
+            if (!hasCompatibleAttachments) {
+                System.out.println("No compatible attachments found for this weapon.");
+            }
+        }
+    }
+
+    // 4. Sales Report by Date Range
+    private static void generateSalesReport(Connection conn, Scanner scanner) throws SQLException {
+        System.out.println("\nSales Report by Date Range:");
+        System.out.print("Enter start date (YYYY-MM-DD): ");
+        String startDate = scanner.nextLine();
+
+        System.out.print("Enter end date (YYYY-MM-DD): ");
+        String endDate = scanner.nextLine();
+
+        String query = """
+        SELECT 
+            t.trans_id,
+            t.transaction_date,
+            CONCAT(c.first_name, ' ', c.last_name) AS customer_name,
+            CONCAT(e.first_name, ' ', e.last_name) AS employee_name,
+            t.payment_method,
+            t.total_amount
+        FROM Transaction t
+        JOIN Customers c ON t.cust_id = c.cust_id
+        JOIN Employee e ON t.emp_id = e.emp_id
+        WHERE t.transaction_date BETWEEN ? AND ?
+        ORDER BY t.transaction_date DESC
+    """;
+
+        try (PreparedStatement stmt = conn.prepareStatement(query)) {
+            stmt.setString(1, startDate + " 00:00:00");
+            stmt.setString(2, endDate + " 23:59:59");
+            ResultSet rs = stmt.executeQuery();
+
+            System.out.println("\nSales Report from " + startDate + " to " + endDate);
+            System.out.println("--------------------------------------------------");
+
+            double totalSales = 0;
+            int transactionCount = 0;
+
+            while (rs.next()) {
+                System.out.println("Transaction ID: " + rs.getInt("trans_id"));
+                System.out.println("Date: " + rs.getTimestamp("transaction_date"));
+                System.out.println("Customer: " + rs.getString("customer_name"));
+                System.out.println("Employee: " + rs.getString("employee_name"));
+                System.out.println("Payment Method: " + rs.getString("payment_method"));
+                System.out.println("Amount: $" + rs.getDouble("total_amount"));
+                System.out.println("--------------------------------------------------");
+
+                totalSales += rs.getDouble("total_amount");
+                transactionCount++;
+            }
+
+            System.out.println("\nSummary:");
+            System.out.println("Total Transactions: " + transactionCount);
+            System.out.println("Total Sales: $" + String.format("%.2f", totalSales));
+
+            if (transactionCount > 0) {
+                System.out.println("Average Sale: $" + String.format("%.2f", totalSales / transactionCount));
+            }
+        }
+    }
+
+    // 5. Check License Expiry
+    private static void checkLicenseExpiry(Connection conn, Scanner scanner) throws SQLException {
+        System.out.println("\nCheck License Expiry Status:");
+        System.out.print("Enter customer ID (or 0 for all expiring licenses): ");
+        int customerId = scanner.nextInt();
+        scanner.nextLine();
+
+        String query;
+        PreparedStatement stmt;
+
+        if (customerId == 0) {
+            System.out.print("Show licenses expiring within how many days? ");
+            int days = scanner.nextInt();
+            scanner.nextLine();
+
+            query = """
+            SELECT l.license_id, l.expiry_date,
+                   CONCAT(c.first_name, ' ', c.last_name) AS customer_name,
+                   c.phone, c.email,
+                   DATEDIFF(l.expiry_date, CURRENT_DATE()) AS days_remaining
+            FROM License l
+            JOIN Customers c ON l.customer_id = c.cust_id
+            WHERE l.expiry_date BETWEEN CURRENT_DATE() AND DATE_ADD(CURRENT_DATE(), INTERVAL ? DAY)
+            ORDER BY l.expiry_date
+        """;
+
+            stmt = conn.prepareStatement(query);
+            stmt.setInt(1, days);
+        } else {
+            query = """
+            SELECT l.license_id, l.expiry_date,
+                   CONCAT(c.first_name, ' ', c.last_name) AS customer_name,
+                   c.phone, c.email,
+                   DATEDIFF(l.expiry_date, CURRENT_DATE()) AS days_remaining
+            FROM License l
+            JOIN Customers c ON l.customer_id = c.cust_id
+            WHERE c.cust_id = ?
+        """;
+
+            stmt = conn.prepareStatement(query);
+            stmt.setInt(1, customerId);
+        }
+
+        try (ResultSet rs = stmt.executeQuery()) {
+            System.out.println("\nLicense Expiry Information:");
+            System.out.println("--------------------------------------------------");
+
+            boolean hasRecords = false;
+            while (rs.next()) {
+                hasRecords = true;
+                int daysRemaining = rs.getInt("days_remaining");
+                String status;
+
+                if (daysRemaining < 0) {
+                    status = "EXPIRED";
+                } else if (daysRemaining <= 30) {
+                    status = "EXPIRING SOON";
+                } else {
+                    status = "ACTIVE";
+                }
+
+                System.out.println("License ID: " + rs.getInt("license_id"));
+                System.out.println("Customer: " + rs.getString("customer_name"));
+                System.out.println("Expiry Date: " + rs.getDate("expiry_date"));
+                System.out.println("Days Remaining: " + (daysRemaining < 0 ? "Expired" : daysRemaining));
+                System.out.println("Status: " + status);
+                System.out.println("Contact: " + rs.getString("phone") + " | " + rs.getString("email"));
+                System.out.println("--------------------------------------------------");
+            }
+
+            if (!hasRecords) {
+                System.out.println("No matching license records found.");
+            }
+        } finally {
+            stmt.close();
+        }
+    }
+
+    // 6. Top Selling Items Report
+    private static void generateTopSellingReport(Connection conn, Scanner scanner) throws SQLException {
+        System.out.println("\nTop Selling Items Report:");
+        System.out.println("1. Weapons");
+        System.out.println("2. Attachments");
+        System.out.println("3. All Items");
+        System.out.print("Choose report type: ");
+
+        int reportType = scanner.nextInt();
+        scanner.nextLine();
+
+        System.out.print("Enter time period (number of days): ");
+        int days = scanner.nextInt();
+        scanner.nextLine();
+
+        String weaponsQuery = """
+        SELECT w.name, w.caliber, SUM(o.quantity) AS total_sold, 
+               SUM(o.quantity * w.price) AS total_revenue
+        FROM Orders o
+        JOIN Orders_Weapons ow ON o.order_id = ow.order_id
+        JOIN Weapons w ON ow.weap_id = w.weap_id
+        JOIN Transaction t ON o.trans_id = t.trans_id
+        WHERE t.transaction_date >= DATE_SUB(CURRENT_DATE(), INTERVAL ? DAY)
+        GROUP BY w.weap_id
+        ORDER BY total_sold DESC
+        LIMIT 10
+    """;
+
+        String attachmentsQuery = """
+        SELECT a.name, SUM(o.quantity) AS total_sold, 
+               SUM(o.quantity * a.price) AS total_revenue
+        FROM Orders o
+        JOIN Orders_Attachments oa ON o.order_id = oa.order_id
+        JOIN Attachments a ON oa.attachment_id = a.attachment_id
+        JOIN Transaction t ON o.trans_id = t.trans_id
+        WHERE t.transaction_date >= DATE_SUB(CURRENT_DATE(), INTERVAL ? DAY)
+        GROUP BY a.attachment_id
+        ORDER BY total_sold DESC
+        LIMIT 10
+    """;
+
+        System.out.println("\nTop Selling Items (Last " + days + " days):");
+        System.out.println("--------------------------------------------------");
+
+        // Top Weapons
+        if (reportType == 1 || reportType == 3) {
+            System.out.println("\nTOP WEAPONS:");
+            System.out.println("--------------------------------------------------");
+
+            try (PreparedStatement stmt = conn.prepareStatement(weaponsQuery)) {
+                stmt.setInt(1, days);
+                ResultSet rs = stmt.executeQuery();
+
+                System.out.printf("%-30s %-15s %-15s %-15s\n",
+                        "Weapon Name", "Caliber", "Units Sold", "Revenue ($)");
+                System.out.println("--------------------------------------------------");
+
+                boolean hasRecords = false;
+                while (rs.next()) {
+                    hasRecords = true;
+                    System.out.printf("%-30s %-15s %-15d $%-15.2f\n",
+                            rs.getString("name"),
+                            rs.getString("caliber"),
+                            rs.getInt("total_sold"),
+                            rs.getDouble("total_revenue"));
+                }
+
+                if (!hasRecords) {
+                    System.out.println("No weapon sales in this period.");
+                }
+            }
+        }
+
+        // Top Attachments
+        if (reportType == 2 || reportType == 3) {
+            System.out.println("\nTOP ATTACHMENTS:");
+            System.out.println("--------------------------------------------------");
+
+            try (PreparedStatement stmt = conn.prepareStatement(attachmentsQuery)) {
+                stmt.setInt(1, days);
+                ResultSet rs = stmt.executeQuery();
+
+                System.out.printf("%-30s %-15s %-15s\n",
+                        "Attachment Name", "Units Sold", "Revenue ($)");
+                System.out.println("--------------------------------------------------");
+
+                boolean hasRecords = false;
+                while (rs.next()) {
+                    hasRecords = true;
+                    System.out.printf("%-30s %-15d $%-15.2f\n",
+                            rs.getString("name"),
+                            rs.getInt("total_sold"),
+                            rs.getDouble("total_revenue"));
+                }
+
+                if (!hasRecords) {
+                    System.out.println("No attachment sales in this period.");
+                }
+            }
+        }
+    }
+
+    private static void generateEmployeePerformanceReport(Connection conn, Scanner scanner) throws SQLException {
+        System.out.println("\nEmployee Performance Report:");
+        System.out.print("Enter time period (number of days, 0 for all time): ");
+        int days = scanner.nextInt();
+        scanner.nextLine();
+
+        String whereClause = days > 0 ? "WHERE t.transaction_date >= DATE_SUB(CURRENT_DATE(), INTERVAL ? DAY)" : "";
+
+        String query = String.format("""
+        SELECT 
+            e.emp_id, 
+            CONCAT(e.first_name, ' ', e.last_name) AS employee_name,
+            e.position,
+            COUNT(t.trans_id) AS transactions_count,
+            SUM(t.total_amount) AS total_sales,
+            AVG(t.total_amount) AS average_sale
+        FROM Employee e
+        LEFT JOIN Transaction t ON e.emp_id = t.emp_id
+        %s
+        GROUP BY e.emp_id
+        ORDER BY total_sales DESC
+    """, whereClause);
+
+        try (PreparedStatement stmt = conn.prepareStatement(query)) {
+            if (days > 0) {
+                stmt.setInt(1, days);
+            }
+
+            ResultSet rs = stmt.executeQuery();
+
+            String periodText = days > 0 ? "Last " + days + " days" : "All time";
+            System.out.println("\nEmployee Performance (" + periodText + "):");
+            System.out.println("--------------------------------------------------");
+            System.out.printf("%-5s %-25s %-15s %-15s %-15s %-15s\n",
+                    "ID", "Name", "Position", "Transactions", "Total Sales ($)", "Avg Sale ($)");
+            System.out.println("--------------------------------------------------");
+
+            while (rs.next()) {
+                double totalSales = rs.getDouble("total_sales");
+                double avgSale = rs.getDouble("average_sale");
+
+                System.out.printf("%-5d %-25s %-15s %-15d $%-15.2f $%-15.2f\n",
+                        rs.getInt("emp_id"),
+                        rs.getString("employee_name"),
+                        rs.getString("position"),
+                        rs.getInt("transactions_count"),
+                        totalSales,
+                        avgSale);
+            }
+        }
+    }
+
+    // 8. Search Functionality
+    private static void searchDatabase(Connection conn, Scanner scanner) throws SQLException {
+        System.out.println("\nSearch Database:");
+        System.out.println("1. Search Weapons");
+        System.out.println("2. Search Attachments");
+        System.out.println("3. Search Customers");
+        System.out.print("Choose search type: ");
+
+        int searchType = scanner.nextInt();
+        scanner.nextLine(); // consume newline
+
+        System.out.print("Enter search term: ");
+        String searchTerm = scanner.nextLine();
+        String searchPattern = "%" + searchTerm + "%";
+
+        switch (searchType) {
+            case 1: {
+                // Search Weapons
+                String weaponsQuery = """
+                SELECT weap_id, name, caliber, price, stock, manufacture
+                FROM Weapons
+                WHERE name LIKE ? OR caliber LIKE ? OR manufacture LIKE ?
+                ORDER BY name
+            """;
+
+                try (PreparedStatement stmt = conn.prepareStatement(weaponsQuery)) {
+                    stmt.setString(1, searchPattern);
+                    stmt.setString(2, searchPattern);
+                    stmt.setString(3, searchPattern);
+
+                    ResultSet rs = stmt.executeQuery();
+
+                    System.out.println("\nWeapons Search Results:");
+                    System.out.println("--------------------------------------------------");
+                    System.out.printf("%-5s %-30s %-10s %-10s %-10s %-20s\n",
+                            "ID", "Name", "Caliber", "Price ($)", "Stock", "Manufacturer");
+                    System.out.println("--------------------------------------------------");
+
+                    boolean hasResults = false;
+                    while (rs.next()) {
+                        hasResults = true;
+                        System.out.printf("%-5d %-30s %-10s %-10.2f %-10d %-20s\n",
+                                rs.getInt("weap_id"),
+                                rs.getString("name"),
+                                rs.getString("caliber"),
+                                rs.getDouble("price"),
+                                rs.getInt("stock"),
+                                rs.getString("manufacture"));
+                    }
+
+                    if (!hasResults) {
+                        System.out.println("No matching weapons found.");
+                    }
+                }
+                break;
+            }
+
+            case 2: {
+                // Search Attachments
+                String attachmentsQuery = """
+                SELECT attachment_id, name, price, stock, manufacture
+                FROM Attachments
+                WHERE name LIKE ? OR manufacture LIKE ?
+                ORDER BY name
+            """;
+
+                try (PreparedStatement stmt = conn.prepareStatement(attachmentsQuery)) {
+                    stmt.setString(1, searchPattern);
+                    stmt.setString(2, searchPattern);
+
+                    ResultSet rs = stmt.executeQuery();
+
+                    System.out.println("\nAttachments Search Results:");
+                    System.out.println("--------------------------------------------------");
+                    System.out.printf("%-5s %-30s %-10s %-10s %-20s\n",
+                            "ID", "Name", "Price ($)", "Stock", "Manufacturer");
+                    System.out.println("--------------------------------------------------");
+
+                    boolean hasResults = false;
+                    while (rs.next()) {
+                        hasResults = true;
+                        System.out.printf("%-5d %-30s %-10.2f %-10d %-20s\n",
+                                rs.getInt("attachment_id"),
+                                rs.getString("name"),
+                                rs.getDouble("price"),
+                                rs.getInt("stock"),
+                                rs.getString("manufacture"));
+                    }
+
+                    if (!hasResults) {
+                        System.out.println("No matching attachments found.");
+                    }
+                }
+                break;
+            }
+
+            case 3: {
+                // Search Customers
+                String customersQuery = """
+                SELECT c.cust_id, CONCAT(c.first_name, ' ', c.last_name) AS full_name, 
+                       c.phone, c.email, c.address, l.expiry_date
+                FROM Customers c
+                LEFT JOIN License l ON c.cust_id = l.customer_id
+                WHERE c.first_name LIKE ? OR c.last_name LIKE ? OR c.email LIKE ? OR c.phone LIKE ?
+                ORDER BY c.last_name, c.first_name
+            """;
+
+                try (PreparedStatement stmt = conn.prepareStatement(customersQuery)) {
+                    stmt.setString(1, searchPattern);
+                    stmt.setString(2, searchPattern);
+                    stmt.setString(3, searchPattern);
+                    stmt.setString(4, searchPattern);
+
+                    ResultSet rs = stmt.executeQuery();
+
+                    System.out.println("\nCustomers Search Results:");
+                    System.out.println("--------------------------------------------------");
+
+                    boolean hasResults = false;
+                    while (rs.next()) {
+                        hasResults = true;
+                        System.out.println("ID: " + rs.getInt("cust_id"));
+                        System.out.println("Name: " + rs.getString("full_name"));
+                        System.out.println("Phone: " + rs.getString("phone"));
+                        System.out.println("Email: " + rs.getString("email"));
+                        System.out.println("Address: " + rs.getString("address"));
+
+                        Date expiryDate = rs.getDate("expiry_date");
+                        if (expiryDate != null) {
+                            System.out.println("License Expiry: " + expiryDate);
+                        } else {
+                            System.out.println("License: None");
+                        }
+
+                        System.out.println("--------------------------------------------------");
+                    }
+
+                    if (!hasResults) {
+                        System.out.println("No matching customers found.");
+                    }
+                }
+                break;
+            }
+
+            default:
+                System.out.println("Invalid search type.");
+        }
+    }
+
+    private static void displayTable(Connection conn, String tableName) {
+        String query = "SELECT * FROM " + tableName;
+        try (Statement stmt = conn.createStatement(); ResultSet rs = stmt.executeQuery(query)) {
+            ResultSetMetaData metaData = rs.getMetaData();
+            int columnCount = metaData.getColumnCount();
+
+            for (int i = 1; i <= columnCount; i++) {
+                System.out.print(metaData.getColumnName(i) + "\t");
+            }
+            System.out.println();
+
+            while (rs.next()) {
+                for (int i = 1; i <= columnCount; i++) {
+                    System.out.print(rs.getString(i) + "\t");
+                }
+                System.out.println();
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private static void addWeapon(Connection conn, Scanner scanner) throws SQLException {
+        System.out.println("\nAdd a new weapon:");
+        System.out.print("Enter weapon name: ");
+        String name = scanner.nextLine();
+
+        String checkQuery = "SELECT * FROM Weapons WHERE name = ?";
+        try (PreparedStatement checkStmt = conn.prepareStatement(checkQuery)) {
+            checkStmt.setString(1, name);
+            ResultSet rs = checkStmt.executeQuery();
+
+            if (rs.next()) {
+                int currentStock = rs.getInt("stock");
+                System.out.println("Weapon already exists. Current stock: " + currentStock);
+                System.out.print("Enter additional stock to add: ");
+                int additionalStock = scanner.nextInt();
+                scanner.nextLine();
+
+                int newStock = currentStock + additionalStock;
+                String updateQuery = "UPDATE Weapons SET stock = ? WHERE name = ?";
+                try (PreparedStatement updateStmt = conn.prepareStatement(updateQuery)) {
+                    updateStmt.setInt(1, newStock);
+                    updateStmt.setString(2, name);
+                    updateStmt.executeUpdate();
+                    System.out.println("Stock updated successfully!");
+                }
+            } else {
+                System.out.print("Enter caliber: ");
+                String caliber = scanner.nextLine();
+                System.out.print("Enter price: ");
+                double price = scanner.nextDouble();
+                System.out.print("Enter stock: ");
+                int stock = scanner.nextInt();
+                scanner.nextLine();
+                System.out.print("Enter manufacturer: ");
+                String manufacture = scanner.nextLine();
+
+                String insertQuery = "INSERT INTO Weapons (name, caliber, price, stock, manufacture) VALUES (?, ?, ?, ?, ?)";
+                try (PreparedStatement insertStmt = conn.prepareStatement(insertQuery)) {
+                    insertStmt.setString(1, name);
+                    insertStmt.setString(2, caliber);
+                    insertStmt.setDouble(3, price);
+                    insertStmt.setInt(4, stock);
+                    insertStmt.setString(5, manufacture);
+                    insertStmt.executeUpdate();
+                    System.out.println("Weapon added successfully!");
+                }
+            }
+        }
+    }
+
+    private static void addAttachment(Connection conn, Scanner scanner) throws SQLException {
+        System.out.println("\nAdd a new attachment:");
+        System.out.print("Enter attachment name: ");
+        String name = scanner.nextLine();
+
+        String checkQuery = "SELECT * FROM Attachments WHERE name = ?";
+        try (PreparedStatement checkStmt = conn.prepareStatement(checkQuery)) {
+            checkStmt.setString(1, name);
+            ResultSet rs = checkStmt.executeQuery();
+
+            if (rs.next()) {
+                int currentStock = rs.getInt("stock");
+                System.out.println("Attachment already exists. Current stock: " + currentStock);
+                System.out.print("Enter additional stock to add: ");
+                int additionalStock = scanner.nextInt();
+                scanner.nextLine();
+
+                int newStock = currentStock + additionalStock;
+                String updateQuery = "UPDATE Attachments SET stock = ? WHERE name = ?";
+                try (PreparedStatement updateStmt = conn.prepareStatement(updateQuery)) {
+                    updateStmt.setInt(1, newStock);
+                    updateStmt.setString(2, name);
+                    updateStmt.executeUpdate();
+                    System.out.println("Stock updated successfully!");
+                }
+            } else {
+                System.out.print("Enter price: ");
+                double price = scanner.nextDouble();
+                System.out.print("Enter stock: ");
+                int stock = scanner.nextInt();
+                scanner.nextLine();
+                System.out.print("Enter manufacturer: ");
+                String manufacture = scanner.nextLine();
+
+                String insertQuery = "INSERT INTO Attachments (name, price, stock, manufacture) VALUES (?, ?, ?, ?)";
+                try (PreparedStatement insertStmt = conn.prepareStatement(insertQuery)) {
+                    insertStmt.setString(1, name);
+                    insertStmt.setDouble(2, price);
+                    insertStmt.setInt(3, stock);
+                    insertStmt.setString(4, manufacture);
+                    insertStmt.executeUpdate();
+                    System.out.println("Attachment added successfully!");
+
+                    // Ask if this attachment fits any weapons
+                    System.out.print("Does this attachment fit any weapons? (y/n): ");
+                    String response = scanner.nextLine();
+                    if (response.equalsIgnoreCase("y")) {
+                        linkAttachmentToWeapons(conn, scanner, name);
+                    }
+                }
+            }
+        }
+    }
+
+    private static void linkAttachmentToWeapons(Connection conn, Scanner scanner, String attachmentName) throws SQLException {
+        // Get the attachment ID
+        int attachmentId = 0;
+        String attachmentQuery = "SELECT attachment_id FROM Attachments WHERE name = ?";
+        try (PreparedStatement stmt = conn.prepareStatement(attachmentQuery)) {
+            stmt.setString(1, attachmentName);
+            ResultSet rs = stmt.executeQuery();
+            if (rs.next()) {
+                attachmentId = rs.getInt("attachment_id");
+            } else {
+                System.out.println("Error: Attachment not found.");
+                return;
+            }
+        }
+
+        // Display available weapons
+        System.out.println("\nAvailable weapons:");
+        String weaponsQuery = "SELECT weap_id, name FROM Weapons";
+        try (Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery(weaponsQuery)) {
+            while (rs.next()) {
+                System.out.println(rs.getInt("weap_id") + ": " + rs.getString("name"));
+            }
+        }
+
+        // Link to weapons
+        while (true) {
+            System.out.print("\nEnter weapon ID to link (or 0 to finish): ");
+            int weaponId = scanner.nextInt();
+            scanner.nextLine();
+
+            if (weaponId == 0) {
+                break;
+            }
+
+            // Check if the weapon exists
+            String weaponCheckQuery = "SELECT name FROM Weapons WHERE weap_id = ?";
+            try (PreparedStatement stmt = conn.prepareStatement(weaponCheckQuery)) {
+                stmt.setInt(1, weaponId);
+                ResultSet rs = stmt.executeQuery();
+                if (!rs.next()) {
+                    System.out.println("Error: Weapon ID not found.");
+                    continue;
+                }
+            }
+
+            // Create the link
+            String linkQuery = "INSERT INTO Weapon_Fits_Attachment (weap_id, attachment_id) VALUES (?, ?)";
+            try (PreparedStatement stmt = conn.prepareStatement(linkQuery)) {
+                stmt.setInt(1, weaponId);
+                stmt.setInt(2, attachmentId);
+                stmt.executeUpdate();
+                System.out.println("Link created successfully!");
+            } catch (SQLException e) {
+                if (e.getErrorCode() == 1062) { // Duplicate entry error
+                    System.out.println("This attachment is already linked to this weapon.");
+                } else {
+                    throw e;
+                }
+            }
+        }
+    }
+
+    private static void addPersonnel(Connection conn, Scanner scanner) throws SQLException {
+        System.out.println("\nAdd Personnel:");
+        System.out.println("1. Add a customer");
+        System.out.println("2. Add an employee");
+        System.out.print("Enter your choice: ");
+
+        int choice = scanner.nextInt();
+        scanner.nextLine();  // Consume newline
+
+        if (choice == 1) {
+            // Add a customer
+            System.out.print("Enter first name: ");
+            String firstName = scanner.nextLine();
+
+            System.out.print("Enter middle name (or press Enter to skip): ");
+            String middleName = scanner.nextLine();
+            if (middleName.isEmpty()) {
+                middleName = null;
+            }
+
+            System.out.print("Enter last name: ");
+            String lastName = scanner.nextLine();
+
+            System.out.print("Enter phone number: ");
+            String phone = scanner.nextLine();
+
+            System.out.print("Enter email: ");
+            String email = scanner.nextLine();
+
+            System.out.print("Enter address: ");
+            String address = scanner.nextLine();
+
+            System.out.print("Enter date of birth (YYYY-MM-DD): ");
+            String dobString = scanner.nextLine();
+            java.sql.Date dob = java.sql.Date.valueOf(dobString);
+
+            conn.setAutoCommit(false);
+
+            try {
+                // First insert the customer
+                String insertCustomerQuery = "INSERT INTO Customers (first_name, middle_name, last_name, phone, email, address, dob) VALUES (?, ?, ?, ?, ?, ?, ?)";
+                int customerId;
+
+                try (PreparedStatement insertStmt = conn.prepareStatement(insertCustomerQuery, Statement.RETURN_GENERATED_KEYS)) {
+                    insertStmt.setString(1, firstName);
+                    insertStmt.setString(2, middleName);
+                    insertStmt.setString(3, lastName);
+                    insertStmt.setString(4, phone);
+                    insertStmt.setString(5, email);
+                    insertStmt.setString(6, address);
+                    insertStmt.setDate(7, dob);
+
+                    int affectedRows = insertStmt.executeUpdate();
+                    if (affectedRows == 0) {
+                        throw new SQLException("Creating customer failed, no rows affected.");
+                    }
+
+                    try (ResultSet generatedKeys = insertStmt.getGeneratedKeys()) {
+                        if (generatedKeys.next()) {
+                            customerId = generatedKeys.getInt(1);
+                        } else {
+                            throw new SQLException("Creating customer failed, no ID obtained.");
+                        }
+                    }
+                }
+
+                // Now add license info
+                System.out.print("Enter license expiry date (YYYY-MM-DD): ");
+                String expiryDateString = scanner.nextLine();
+                java.sql.Date expiryDate = java.sql.Date.valueOf(expiryDateString);
+
+                String insertLicenseQuery = "INSERT INTO License (expiry_date, customer_id) VALUES (?, ?)";
+                try (PreparedStatement licenseStmt = conn.prepareStatement(insertLicenseQuery)) {
+                    licenseStmt.setDate(1, expiryDate);
+                    licenseStmt.setInt(2, customerId);
+                    licenseStmt.executeUpdate();
+                }
+
+                conn.commit();
+                System.out.println("Customer added successfully! Customer ID: " + customerId);
+            } catch (SQLException e) {
+                conn.rollback();
+                System.out.println("Error adding customer. Operation rolled back.");
+                e.printStackTrace();
+            } finally {
+                conn.setAutoCommit(true);
+            }
+
+        } else if (choice == 2) {
+            // Add an employee
+            System.out.print("Enter first name: ");
+            String firstName = scanner.nextLine();
+
+            System.out.print("Enter middle name (or press Enter to skip): ");
+            String middleName = scanner.nextLine();
+            if (middleName.isEmpty()) {
+                middleName = null;
+            }
+
+            System.out.print("Enter last name: ");
+            String lastName = scanner.nextLine();
+
+            System.out.print("Enter position: ");
+            String position = scanner.nextLine();
+
+            System.out.print("Enter salary: ");
+            double salary = scanner.nextDouble();
+            scanner.nextLine();  // Consume newline
+
+            System.out.print("Enter hire date (YYYY-MM-DD): ");
+            String hireDateString = scanner.nextLine();
+            java.sql.Date hireDate = java.sql.Date.valueOf(hireDateString);
+
+            String insertQuery = "INSERT INTO Employee (first_name, middle_name, last_name, position, salary, hire_date) VALUES (?, ?, ?, ?, ?, ?)";
+            try (PreparedStatement insertStmt = conn.prepareStatement(insertQuery, Statement.RETURN_GENERATED_KEYS)) {
+                insertStmt.setString(1, firstName);
+                insertStmt.setString(2, middleName);
+                insertStmt.setString(3, lastName);
+                insertStmt.setString(4, position);
+                insertStmt.setDouble(5, salary);
+                insertStmt.setDate(6, hireDate);
+
+                int affectedRows = insertStmt.executeUpdate();
+                if (affectedRows > 0) {
+                    ResultSet generatedKeys = insertStmt.getGeneratedKeys();
+                    if (generatedKeys.next()) {
+                        int employeeId = generatedKeys.getInt(1);
+                        System.out.println("Employee added successfully! Employee ID: " + employeeId);
+                    }
+                }
+            }
+        } else {
+            System.out.println("Invalid choice. Returning to main menu.");
+        }
+    }
+
+    private static void placeOrder(Connection conn, Scanner scanner) throws SQLException {
+        System.out.println("\nPlace an order:");
+
+        // Lists to track order items
+        List<String> weaponNames = new ArrayList<>();
+        List<Integer> weaponQuantities = new ArrayList<>();
+        List<Integer> weaponIds = new ArrayList<>();
+        List<Double> weaponPrices = new ArrayList<>();
+
+        List<String> attachmentNames = new ArrayList<>();
+        List<Integer> attachmentQuantities = new ArrayList<>();
+        List<Integer> attachmentIds = new ArrayList<>();
+        List<Double> attachmentPrices = new ArrayList<>();
+
+        // Order weapons
+        System.out.println("\nWeapons:");
+        while (true) {
+            System.out.print("Enter weapon name (or 'done' to continue to attachments): ");
+            String name = scanner.nextLine();
+            if (name.equalsIgnoreCase("done")) break;
+
+            System.out.print("Enter quantity: ");
+            int quantity = scanner.nextInt();
+            scanner.nextLine();
+
+            weaponNames.add(name);
+            weaponQuantities.add(quantity);
+        }
+
+        // Order attachments
+        System.out.println("\nAttachments:");
+        while (true) {
+            System.out.print("Enter attachment name (or 'done' to finish): ");
+            String name = scanner.nextLine();
+            if (name.equalsIgnoreCase("done")) break;
+
+            System.out.print("Enter quantity: ");
+            int quantity = scanner.nextInt();
+            scanner.nextLine();
+
+            attachmentNames.add(name);
+            attachmentQuantities.add(quantity);
+        }
+
+        // If no items selected, return to main menu
+        if (weaponNames.isEmpty() && attachmentNames.isEmpty()) {
+            System.out.println("No items selected. Returning to main menu.");
+            return;
+        }
+
+        // Get customer and employee info for the transaction
+        System.out.print("Enter customer ID: ");
+        int customerId = scanner.nextInt();
+        scanner.nextLine();
+
+        System.out.print("Enter employee ID: ");
+        int employeeId = scanner.nextInt();
+        scanner.nextLine();
+
+        System.out.print("Enter payment method: ");
+        String paymentMethod = scanner.nextLine();
+
+        conn.setAutoCommit(false);
+        boolean orderSuccess = true;
+        double totalPrice = 0;
+
+        try {
+            // First check if all weapon orders can be fulfilled
+            for (int i = 0; i < weaponNames.size(); i++) {
+                String name = weaponNames.get(i);
+                int quantity = weaponQuantities.get(i);
+
+                String checkQuery = "SELECT weap_id, stock, price FROM Weapons WHERE name = ?";
+                try (PreparedStatement checkStmt = conn.prepareStatement(checkQuery)) {
+                    checkStmt.setString(1, name);
+                    ResultSet rs = checkStmt.executeQuery();
+
+                    if (rs.next()) {
+                        int stock = rs.getInt("stock");
+                        double price = rs.getDouble("price");
+                        int weapId = rs.getInt("weap_id");
+
+                        if (stock >= quantity) {
+                            weaponIds.add(weapId);
+                            weaponPrices.add(price);
+                            totalPrice += quantity * price;
+                        } else {
+                            System.out.println("Not enough stock for weapon: " + name + ". Order canceled.");
+                            orderSuccess = false;
+                            break;
+                        }
+                    } else {
+                        System.out.println("Weapon " + name + " not available. Order canceled.");
+                        orderSuccess = false;
+                        break;
+                    }
+                }
+            }
+
+            // Then check if all attachment orders can be fulfilled
+            if (orderSuccess) {
+                for (int i = 0; i < attachmentNames.size(); i++) {
+                    String name = attachmentNames.get(i);
+                    int quantity = attachmentQuantities.get(i);
+
+                    String checkQuery = "SELECT attachment_id, stock, price FROM Attachments WHERE name = ?";
+                    try (PreparedStatement checkStmt = conn.prepareStatement(checkQuery)) {
+                        checkStmt.setString(1, name);
+                        ResultSet rs = checkStmt.executeQuery();
+
+                        if (rs.next()) {
+                            int stock = rs.getInt("stock");
+                            double price = rs.getDouble("price");
+                            int attachId = rs.getInt( "attachment_id");
+
+                            if (stock >= quantity) {
+                                attachmentIds.add(attachId);
+                                attachmentPrices.add(price);
+                                totalPrice += quantity * price;
+                            } else {
+                                System.out.println("Not enough stock for attachment: " + name + ". Order canceled.");
+                                orderSuccess = false;
+                                break;
+                            }
+                        } else {
+                            System.out.println("Attachment " + name + " not available. Order canceled.");
+                            orderSuccess = false;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (orderSuccess) {
+                // Create transaction first
+                String insertTransactionQuery = "INSERT INTO Transaction (total_amount, payment_method, emp_id, cust_id) VALUES (?, ?, ?, ?)";
+                int transId;
+
+                try (PreparedStatement transStmt = conn.prepareStatement(insertTransactionQuery, Statement.RETURN_GENERATED_KEYS)) {
+                    transStmt.setDouble(1, totalPrice);
+                    transStmt.setString(2, paymentMethod);
+                    transStmt.setInt(3, employeeId);
+                    transStmt.setInt(4, customerId);
+                    transStmt.executeUpdate();
+
+                    ResultSet generatedKeys = transStmt.getGeneratedKeys();
+                    if (generatedKeys.next()) {
+                        transId = generatedKeys.getInt(1);
+                    } else {
+                        throw new SQLException("Creating transaction failed, no ID obtained.");
+                    }
+                }
+
+                // Process each weapon
+                for (int i = 0; i < weaponIds.size(); i++) {
+                    int weapId = weaponIds.get(i);
+                    int quantity = weaponQuantities.get(i);
+
+                    // Create order entry
+                    String insertOrderQuery = "INSERT INTO Orders (quantity, trans_id) VALUES (?, ?)";
+                    int orderId;
+
+                    try (PreparedStatement orderStmt = conn.prepareStatement(insertOrderQuery, Statement.RETURN_GENERATED_KEYS)) {
+                        orderStmt.setInt(1, quantity);
+                        orderStmt.setInt(2, transId);
+                        orderStmt.executeUpdate();
+
+                        ResultSet generatedKeys = orderStmt.getGeneratedKeys();
+                        if (generatedKeys.next()) {
+                            orderId = generatedKeys.getInt(1);
+                        } else {
+                            throw new SQLException("Creating order failed, no ID obtained.");
+                        }
+                    }
+
+                    // Link order to weapon in Orders_Weapons table
+                    String insertOrderWeaponQuery = "INSERT INTO Orders_Weapons (order_id, weap_id) VALUES (?, ?)";
+                    try (PreparedStatement orderWeaponStmt = conn.prepareStatement(insertOrderWeaponQuery)) {
+                        orderWeaponStmt.setInt(1, orderId);
+                        orderWeaponStmt.setInt(2, weapId);
+                        orderWeaponStmt.executeUpdate();
+                    }
+
+                    // Update weapon stock
+                    String updateStockQuery = "UPDATE Weapons SET stock = stock - ? WHERE weap_id = ?";
+                    try (PreparedStatement updateStmt = conn.prepareStatement(updateStockQuery)) {
+                        updateStmt.setInt(1, quantity);
+                        updateStmt.setInt(2, weapId);
+                        updateStmt.executeUpdate();
+                    }
+                }
+
+                // Process each attachment
+                for (int i = 0; i < attachmentIds.size(); i++) {
+                    int attachId = attachmentIds.get(i);
+                    int quantity = attachmentQuantities.get(i);
+
+                    // Create order entry
+                    String insertOrderQuery = "INSERT INTO Orders (quantity, trans_id) VALUES (?, ?)";
+                    int orderId;
+
+                    try (PreparedStatement orderStmt = conn.prepareStatement(insertOrderQuery, Statement.RETURN_GENERATED_KEYS)) {
+                        orderStmt.setInt(1, quantity);
+                        orderStmt.setInt(2, transId);
+                        orderStmt.executeUpdate();
+
+                        ResultSet generatedKeys = orderStmt.getGeneratedKeys();
+                        if (generatedKeys.next()) {
+                            orderId = generatedKeys.getInt(1);
+                        } else {
+                            throw new SQLException("Creating order failed, no ID obtained.");
+                        }
+                    }
+
+                    // Link order to attachment in Orders_Attachments table
+                    String insertOrderAttachmentQuery = "INSERT INTO Orders_Attachments (order_id, attachment_id) VALUES (?, ?)";
+                    try (PreparedStatement orderAttachmentStmt = conn.prepareStatement(insertOrderAttachmentQuery)) {
+                        orderAttachmentStmt.setInt(1, orderId);
+                        orderAttachmentStmt.setInt(2, attachId);
+                        orderAttachmentStmt.executeUpdate();
+                    }
+
+                    // Update attachment stock
+                    String updateStockQuery = "UPDATE Attachments SET stock = stock - ? WHERE attachment_id = ?";
+                    try (PreparedStatement updateStmt = conn.prepareStatement(updateStockQuery)) {
+                        updateStmt.setInt(1, quantity);
+                        updateStmt.setInt(2, attachId);
+                        updateStmt.executeUpdate();
+                    }
+                }
+
+                conn.commit();
+                System.out.println("Transaction completed successfully! Transaction ID: " + transId);
+                System.out.println("Total price: $" + totalPrice);
+
+                // Print order summary
+                System.out.println("\nOrder Summary:");
+                if (!weaponNames.isEmpty()) {
+                    System.out.println("Weapons:");
+                    for (int i = 0; i < weaponNames.size(); i++) {
+                        System.out.printf("  %s x%d: $%.2f\n",
+                                weaponNames.get(i),
+                                weaponQuantities.get(i),
+                                weaponQuantities.get(i) * weaponPrices.get(i));
+                    }
+                }
+
+                if (!attachmentNames.isEmpty()) {
+                    System.out.println("Attachments:");
+                    for (int i = 0; i < attachmentNames.size(); i++) {
+                        System.out.printf("  %s x%d: $%.2f\n",
+                                attachmentNames.get(i),
+                                attachmentQuantities.get(i),
+                                attachmentQuantities.get(i) * attachmentPrices.get(i));
+                    }
+                }
+
+                System.out.printf("Total: $%.2f\n", totalPrice);
+            } else {
+                conn.rollback();
+                System.out.println("Transaction canceled.");
+            }
+        } catch (SQLException e) {
+            conn.rollback();
+            System.out.println("Error during transaction. All changes rolled back.");
+            e.printStackTrace();
+        } finally {
+            conn.setAutoCommit(true);
+        }
+    }
+} yeh queries check karlo aur bata do koi normalization lagani hai kya
